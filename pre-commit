@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Copy this file into your pldb-src/.git/hooks directory to activate
+
+function find_forbidden() {
+  grep --color --with-filename -n -E "$1" $2 && \
+  echo 'COMMIT REJECTED Found "'$3'" references. Please remove them before committing' \
+  && exit 1
+}
+
+# Runs pep8 program and checks the exit status
+function run_pep8() {
+  pep8 $1 &> /dev/null
+  if [ $? -ne 0 ]
+  then
+    echo 'COMMIT REJECTED pep8 found an error in file: '$1' Please fix before commiting.' && exit 1
+  fi
+}
+
+# Runs pylint and checks the exit status
+function run_pylint() {
+  pylint --rcfile=$1 $2 &> /dev/null
+
+  PYLINT_EXIT_STATUS=$?
+  # exit on fatal, error
+  PYLINT_FATAL=1
+  PYLINT_ERROR=2
+  PYLINT_FATAL_OR_ERROR=$(($PYLINT_FATAL | $PYLINT_ERROR))
+  PYLINT_ERROR_STATE=$(($PYLINT_EXIT_STATUS & $PYLINT_FATAL_OR_ERROR))
+  if [ $PYLINT_ERROR_STATE -ne 0 ]
+  then
+    echo 'COMMIT REJECTED pylint found an error in file: '$2' Please fix before commiting.' && exit 1
+  fi
+}
+
+
+PYTHON_FILES_PATTERN='\.py(\..+)?$'
+MODIFIED_PYTHON_FILES=`git diff --cached --name-only | grep -E $PYTHON_FILES_PATTERN $MODIFIED_FILES`
+
+if [ "$MODIFIED_PYTHON_FILES" != "" ]
+then
+  # Check for leftover pdb.set_trace() 
+  find_forbidden 'pdb.set_trace()' ${MODIFIED_PYTHON_FILES} 'pdb.set_trace()'
+  # Check for trailing whitespace
+  find_forbidden " $" ${MODIFIED_PYTHON_FILES} 'trailing whitespace'
+
+  for FILE in ${MODIFIED_PYTHON_FILES}
+  do
+    # Run some pychecking goodness
+    if hash pep8 2>/dev/null
+    then
+      run_pep8 $FILE
+    fi
+
+    if hash pylint 2>/dev/null
+    then
+      PLDB_SRC_ROOT=`git rev-parse --show-toplevel`
+      run_pylint ${PLDB_SRC_ROOT}/server_setup/pylint.conf $FILE
+    fi 
+  done
+fi
+
